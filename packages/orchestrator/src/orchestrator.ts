@@ -232,7 +232,62 @@ export class SimulationOrchestrator {
       }
     }
 
-    // Verify provenance fingerprint consistency
+    // Verify model identity matches the invoked plugin
+    if (parsedResult.model.id !== model.manifest.id) {
+      throw new SimulationError({
+        code: 'INCOMPATIBLE_PLUGIN',
+        message: `Simulation result model ID '${parsedResult.model.id}' does not match invoked model '${model.manifest.id}'`,
+        expected: model.manifest.id,
+        actual: parsedResult.model.id,
+      });
+    }
+    if (parsedResult.model.modelVersion !== model.manifest.version) {
+      throw new SimulationError({
+        code: 'INCOMPATIBLE_PLUGIN',
+        message: `Simulation result modelVersion '${parsedResult.model.modelVersion}' does not match plugin manifest version '${model.manifest.version}'`,
+        expected: model.manifest.version,
+        actual: parsedResult.model.modelVersion,
+      });
+    }
+
+    // Verify calibration identity in provenance matches authoritative calibration
+    if (parsedResult.provenance.calibrationId !== calibration.id) {
+      throw new SimulationError({
+        code: 'CALIBRATION_VERSION_MISMATCH',
+        message: `Simulation result calibrationId '${parsedResult.provenance.calibrationId}' does not match selected calibration '${calibration.id}'`,
+        expected: calibration.id,
+        actual: parsedResult.provenance.calibrationId,
+      });
+    }
+    if (parsedResult.provenance.calibrationVersion !== calibration.version) {
+      throw new SimulationError({
+        code: 'CALIBRATION_VERSION_MISMATCH',
+        message: `Simulation result calibrationVersion '${parsedResult.provenance.calibrationVersion}' does not match selected calibration '${calibration.version}'`,
+        expected: calibration.version,
+        actual: parsedResult.provenance.calibrationVersion,
+      });
+    }
+    if (parsedResult.provenance.calibrationContentHash !== calibration.contentHash) {
+      throw new SimulationError({
+        code: 'CALIBRATION_CORRUPT',
+        message: `Simulation result provenance calibration hash (${parsedResult.provenance.calibrationContentHash}) does not match repository hash (${calibration.contentHash})`,
+        expected: calibration.contentHash,
+        actual: parsedResult.provenance.calibrationContentHash,
+      });
+    }
+
+    // Verify participating modules list contains the invoked model
+    const hasModelModule = parsedResult.provenance.participatingModules.some(
+      (m) => m.id === model.manifest.id && m.modelVersion === model.manifest.version
+    );
+    if (!hasModelModule) {
+      throw new SimulationError({
+        code: 'INCOMPATIBLE_PLUGIN',
+        message: `Simulation result participatingModules must include model '${model.manifest.id}@${model.manifest.version}'`,
+      });
+    }
+
+    // Verify provenance input fingerprint consistency
     const expectedInputFingerprint = computeInputFingerprint(validatedInput);
     if (parsedResult.provenance.inputFingerprint !== expectedInputFingerprint) {
       throw new SimulationError({
@@ -240,15 +295,6 @@ export class SimulationOrchestrator {
         message: `Simulation result provenance input fingerprint (${parsedResult.provenance.inputFingerprint}) does not match expected input fingerprint (${expectedInputFingerprint})`,
         expected: expectedInputFingerprint,
         actual: parsedResult.provenance.inputFingerprint,
-      });
-    }
-
-    if (parsedResult.provenance.calibrationContentHash !== calibration.contentHash) {
-      throw new SimulationError({
-        code: 'CALIBRATION_CORRUPT',
-        message: `Simulation result provenance calibration hash (${parsedResult.provenance.calibrationContentHash}) does not match repository hash (${calibration.contentHash})`,
-        expected: calibration.contentHash,
-        actual: parsedResult.provenance.calibrationContentHash,
       });
     }
 
