@@ -395,6 +395,7 @@ export class BaselineEngineModel implements SimulationModel<SimulationModelInput
         calibrationVersion: calibration.version,
         calibrationContentHash: calibration.contentHash,
         participatingModules: [
+          { id: this.manifest.id, modelVersion: this.manifest.version, schemaVersion: 'simulation-result/1' },
           { id: this.kinematics.id, modelVersion: this.kinematics.modelVersion, schemaVersion: this.kinematics.schemaVersion },
           { id: this.combustion.id, modelVersion: this.combustion.modelVersion, schemaVersion: this.combustion.schemaVersion },
           { id: this.thermo.id, modelVersion: this.thermo.modelVersion, schemaVersion: this.thermo.schemaVersion },

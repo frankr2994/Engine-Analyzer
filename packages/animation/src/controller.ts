@@ -68,6 +68,7 @@ export class SharedCrankAngleController implements CrankAngleController {
   private readonly clock: ClockPort;
   public readonly grid: CrankAngleGrid;
   private readonly cycleDegrees: number;
+  private readonly gridSpanDegrees: number;
   private currentAngleDeg: number;
   private isPlayingState = false;
   private rate: number;
@@ -104,29 +105,36 @@ export class SharedCrankAngleController implements CrankAngleController {
       });
     }
     this.cycleDegrees = this.grid.convention.cycleDegrees;
-    this.currentAngleDeg = options.initialAngleDeg ?? 0;
+    const span = this.grid.endAngleDeg - this.grid.startAngleDeg;
+    this.gridSpanDegrees = span > 0 ? span : this.cycleDegrees;
+    this.currentAngleDeg = options.initialAngleDeg ?? this.grid.startAngleDeg;
     this.rate = options.playbackRate ?? 1.0;
     this.nominalRpm = options.rpm ?? 1200.0;
     this.normalizeAngle();
   }
 
   private normalizeAngle(): void {
-    let angle = this.currentAngleDeg % this.cycleDegrees;
-    if (angle < 0) {
-      angle += this.cycleDegrees;
+    if (this.grid.convention.endpointIncluded && Math.abs(this.currentAngleDeg - this.grid.endAngleDeg) < 1e-6) {
+      this.currentAngleDeg = this.grid.endAngleDeg;
+      return;
     }
-    this.currentAngleDeg = angle;
+    const start = this.grid.startAngleDeg;
+    let offset = (this.currentAngleDeg - start) % this.gridSpanDegrees;
+    if (offset < 0) {
+      offset += this.gridSpanDegrees;
+    }
+    this.currentAngleDeg = start + offset;
   }
 
   private getClosestSampleIndex(angle: number): number {
     const res = this.grid.resolutionDeg;
-    const idx = Math.round(angle / res);
+    const idx = Math.round((angle - this.grid.startAngleDeg) / res);
     return Math.max(0, Math.min(this.grid.sampleCount - 1, idx));
   }
 
   public getState(): AnimationStateSnapshot {
     const sampleIdx = this.getClosestSampleIndex(this.currentAngleDeg);
-    const progress = this.currentAngleDeg / this.cycleDegrees;
+    const progress = (this.currentAngleDeg - this.grid.startAngleDeg) / this.gridSpanDegrees;
 
     return deepFreeze({
       revision: this.revisionNumber,
@@ -182,14 +190,18 @@ export class SharedCrankAngleController implements CrankAngleController {
 
   public seekToProgress(progress0to1: number): void {
     const clampedProgress = Math.max(0, Math.min(1.0, progress0to1));
-    this.currentAngleDeg = clampedProgress * this.cycleDegrees;
+    if (clampedProgress >= 1.0 && this.grid.convention.endpointIncluded) {
+      this.currentAngleDeg = this.grid.endAngleDeg;
+    } else {
+      this.currentAngleDeg = this.grid.startAngleDeg + (clampedProgress % 1.0) * this.gridSpanDegrees;
+    }
     this.normalizeAngle();
     this.notify();
   }
 
   public seekToSampleIndex(index: number): void {
     const clampedIdx = Math.max(0, Math.min(this.grid.sampleCount - 1, index));
-    this.currentAngleDeg = this.grid.samples[clampedIdx] ?? 0;
+    this.currentAngleDeg = this.grid.samples[clampedIdx] ?? this.grid.startAngleDeg;
     this.normalizeAngle();
     this.notify();
   }

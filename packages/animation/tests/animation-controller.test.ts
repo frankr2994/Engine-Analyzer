@@ -106,4 +106,107 @@ describe('Shared Crank Angle Controller (Phase 7)', () => {
     unsubA();
     unsubB();
   });
+
+  it('correctly maps sample indices and normalizes angles for grids with non-zero startAngleDeg', () => {
+    // Grid starting at 30 deg, resolution 5 deg, 360 deg cycle (72 samples)
+    const samples = Array.from({ length: 72 }, (_, i) => 30 + i * 5);
+    const nonZeroGrid = {
+      convention: TWO_STROKE_TDC_CONVENTION,
+      startAngleDeg: 30,
+      endAngleDeg: 390,
+      resolutionDeg: 5.0,
+      sampleCount: 72,
+      samples,
+    };
+
+    const ctrl = new SharedCrankAngleController({
+      clock,
+      grid: nonZeroGrid,
+      initialAngleDeg: 30,
+    });
+
+    // 1. Initial state at start angle
+    const s0 = ctrl.getState();
+    expect(s0.angleDegrees).toBe(30.0);
+    expect(s0.sampleIndex).toBe(0);
+    expect(s0.normalizedCycleProgress).toBe(0.0);
+
+    // 2. Seek to angle 35 -> index 1
+    ctrl.seekToAngle(35.0);
+    const s1 = ctrl.getState();
+    expect(s1.angleDegrees).toBe(35.0);
+    expect(s1.sampleIndex).toBe(1);
+
+    // 3. Seek to angle 50 -> index 4 ((50 - 30) / 5 = 4)
+    ctrl.seekToAngle(50.0);
+    const s4 = ctrl.getState();
+    expect(s4.angleDegrees).toBe(50.0);
+    expect(s4.sampleIndex).toBe(4);
+
+    // 4. Seek to sample index 10 -> angle 30 + 10 * 5 = 80
+    ctrl.seekToSampleIndex(10);
+    const s10 = ctrl.getState();
+    expect(s10.angleDegrees).toBe(80.0);
+    expect(s10.sampleIndex).toBe(10);
+
+    // 5. Seek to progress 0.5 -> angle 30 + 0.5 * 360 = 210
+    ctrl.seekToProgress(0.5);
+    const sHalf = ctrl.getState();
+    expect(sHalf.angleDegrees).toBe(210.0);
+    expect(sHalf.sampleIndex).toBe(36);
+    expect(sHalf.normalizedCycleProgress).toBe(0.5);
+
+    // 6. Angle wrapping beyond 390 deg wraps back into [30, 390)
+    ctrl.seekToAngle(400.0); // 400 - 30 = 370 -> 370 % 360 = 10 -> angle 40
+    const sWrap = ctrl.getState();
+    expect(sWrap.angleDegrees).toBe(40.0);
+    expect(sWrap.sampleIndex).toBe(2);
+
+    ctrl.dispose();
+  });
+
+  it('correctly manages partial grids where grid span is smaller than convention cycle', () => {
+    // Partial grid covering only 180 to 540 deg (span 360 deg) on a 4-stroke 720 deg convention
+    const samples = Array.from({ length: 361 }, (_, i) => 180 + i * 1.0);
+    const partialGrid = {
+      convention: { ...FOUR_STROKE_TDC_CONVENTION, endpointIncluded: true },
+      startAngleDeg: 180,
+      endAngleDeg: 540,
+      resolutionDeg: 1.0,
+      sampleCount: 361,
+      samples,
+    };
+
+    const ctrl = new SharedCrankAngleController({
+      clock,
+      grid: partialGrid,
+      initialAngleDeg: 180,
+    });
+
+    const s0 = ctrl.getState();
+    expect(s0.angleDegrees).toBe(180.0);
+    expect(s0.sampleIndex).toBe(0);
+    expect(s0.normalizedCycleProgress).toBe(0.0);
+
+    // Progress 0.5 should be at midpoint 180 + 0.5 * 360 = 360 deg
+    ctrl.seekToProgress(0.5);
+    const sMid = ctrl.getState();
+    expect(sMid.angleDegrees).toBe(360.0);
+    expect(sMid.sampleIndex).toBe(180);
+    expect(sMid.normalizedCycleProgress).toBe(0.5);
+
+    // Progress 1.0 with endpointIncluded should seek to exactly 540 deg
+    ctrl.seekToProgress(1.0);
+    const sEnd = ctrl.getState();
+    expect(sEnd.angleDegrees).toBe(540.0);
+    expect(sEnd.sampleIndex).toBe(360);
+
+    // Wrapping past 540 wraps within [180, 540)
+    ctrl.seekToAngle(560.0); // 560 - 180 = 380 -> 380 % 360 = 20 -> 180 + 20 = 200
+    const sWrapped = ctrl.getState();
+    expect(sWrapped.angleDegrees).toBe(200.0);
+    expect(sWrapped.sampleIndex).toBe(20);
+
+    ctrl.dispose();
+  });
 });

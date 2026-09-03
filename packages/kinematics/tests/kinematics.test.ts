@@ -68,4 +68,36 @@ describe('Kinematics Calculation Module', () => {
     expect(result.value.maxPistonSpeedMs).toBeGreaterThan(18.0);
     expect(result.value.maxPistonSpeedMs).toBeLessThan(35.0);
   });
+
+  it('throws PHYSICAL_INVARIANT_VIOLATION when rod cannot span crank radius plus wrist-pin offset', () => {
+    const invalidEngine: EngineGeometryInput = {
+      boreMm: 84.0,
+      strokeMm: 100.0, // r = 50
+      connectingRodLengthMm: 60.0, // l = 60
+      compressionRatio: 10.0,
+      cylinderCount: 4,
+      wristPinOffsetMm: 15.0, // r + offset = 65 > 60
+    };
+
+    expect(() => module.calculate({ engine: invalidEngine, rpm: 3000 })).toThrowError(/PHYSICAL_INVARIANT_VIOLATION/);
+  });
+
+  it('calculates kinematics accurately with valid non-zero wrist-pin offset', () => {
+    const offsetEngine: EngineGeometryInput = {
+      ...standardEngine,
+      wristPinOffsetMm: 5.0,
+    };
+    const grid = createCrankAngleGrid({ resolutionDeg: 1.0 });
+    const result = module.calculate({ engine: offsetEngine, rpm: 3000, grid });
+
+    expect(result.schemaVersion).toBe('calculation-result/1');
+    const posChannel = result.value.channels.find((c) => c.channelId === 'piston_position_mm')!;
+    const volChannel = result.value.channels.find((c) => c.channelId === 'cylinder_volume_cm3')!;
+
+    // For offset = 5mm, TDC occurs at theta = asin(5 / (45 + 145)) ~ 1.5 deg. At theta = 0, position is ~0.02 mm
+    expect(posChannel.samples[0]).toBeCloseTo(0.02, 2);
+    expect(volChannel.samples[0]).toBeGreaterThan(0.0);
+    expect(posChannel.samples.every((s) => Number.isFinite(s))).toBe(true);
+    expect(volChannel.samples.every((s) => Number.isFinite(s))).toBe(true);
+  });
 });

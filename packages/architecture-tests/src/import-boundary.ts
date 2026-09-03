@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as ts from 'typescript';
 
 export interface DependencyRule {
   readonly allowedImports: readonly string[];
@@ -59,7 +60,10 @@ export const ARCHITECTURE_RULES: Readonly<Record<string, DependencyRule>> = Obje
     ],
   },
   'baseline-engine': {
-    allowedImports: ['@engine-analyzer/contracts', '@engine-analyzer/kinematics'],
+    allowedImports: [
+      '@engine-analyzer/contracts',
+      '@engine-analyzer/kinematics',
+    ],
     forbiddenImports: [
       '@engine-analyzer/validation',
       '@engine-analyzer/calibration',
@@ -70,7 +74,10 @@ export const ARCHITECTURE_RULES: Readonly<Record<string, DependencyRule>> = Obje
     ],
   },
   'plugin-two-stroke': {
-    allowedImports: ['@engine-analyzer/contracts', '@engine-analyzer/kinematics'],
+    allowedImports: [
+      '@engine-analyzer/contracts',
+      '@engine-analyzer/kinematics',
+    ],
     forbiddenImports: [
       '@engine-analyzer/validation',
       '@engine-analyzer/calibration',
@@ -151,21 +158,83 @@ export interface ImportViolation {
   readonly reason: string;
 }
 
-export function extractImports(sourceCode: string): string[] {
-  const importRegex = /(?:import|export)\s+(?:[\w*\s{},]*\s+from\s+)?['"]([^'"]+)['"]/g;
-  const matches: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = importRegex.exec(sourceCode)) !== null) {
-    if (match[1]) {
-      matches.push(match[1]);
-    }
+function getStringValue(node: ts.Node | undefined): string | null {
+  if (!node) return null;
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text;
   }
-  return matches;
+  return null;
+}
+
+/**
+ * Extracts all module specifiers using full recursive TypeScript AST traversal.
+ * Detects:
+ * - import declarations: import x from 'mod'; import 'mod'; import `mod`;
+ * - export declarations: export * from 'mod'; export { x } from `mod`;
+ * - import-equals declarations: import x = require('mod');
+ * - dynamic imports: import('mod'), import(`mod`)
+ * - CommonJS require calls in any statement/expression: require('mod'), require(`mod`)
+ */
+export function extractImports(sourceCode: string, fileName = 'file.ts'): string[] {
+  const sourceFile = ts.createSourceFile(fileName, sourceCode, ts.ScriptTarget.Latest, true);
+  const imports: string[] = [];
+
+  function visit(node: ts.Node): void {
+    // 1. Static import: import ... from 'mod' or import 'mod'
+    if (ts.isImportDeclaration(node)) {
+      const val = getStringValue(node.moduleSpecifier);
+      if (val) {
+        imports.push(val);
+      }
+    }
+    // 2. Export from: export ... from 'mod'
+    else if (ts.isExportDeclaration(node)) {
+      const val = getStringValue(node.moduleSpecifier);
+      if (val) {
+        imports.push(val);
+      }
+    }
+    // 3. Import equals: import x = require('mod')
+    else if (ts.isImportEqualsDeclaration(node)) {
+      if (
+        node.moduleReference &&
+        ts.isExternalModuleReference(node.moduleReference) &&
+        node.moduleReference.expression
+      ) {
+        const val = getStringValue(node.moduleReference.expression);
+        if (val) {
+          imports.push(val);
+        }
+      }
+    }
+    // 4. Call expressions: require('mod') or dynamic import('mod')
+    else if (ts.isCallExpression(node)) {
+      // dynamic import('mod') or import(`mod`)
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        const val = getStringValue(node.arguments[0]);
+        if (val) {
+          imports.push(val);
+        }
+      }
+      // CommonJS require('mod') or require(`mod`)
+      else if (ts.isIdentifier(node.expression) && node.expression.text === 'require') {
+        const val = getStringValue(node.arguments[0]);
+        if (val) {
+          imports.push(val);
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return imports;
 }
 
 export function checkFileImports(filePath: string, packageName: string, sourceCode?: string): ImportViolation[] {
   const code = sourceCode ?? fs.readFileSync(filePath, 'utf-8');
-  const imports = extractImports(code);
+  const imports = extractImports(code, filePath);
   const rule = ARCHITECTURE_RULES[packageName];
   if (!rule) {
     return [];
@@ -219,11 +288,24 @@ export function checkFileImports(filePath: string, packageName: string, sourceCo
     }
 
     // 2. Check relative imports escaping package boundaries
-    if (imp.startsWith('..')) {
+    if (imp.startsWith('..') || imp.startsWith('.')) {
       const dir = path.dirname(filePath);
       const resolved = path.resolve(dir, imp);
-      const pkgDir = path.resolve(filePath.split(path.join('packages', packageName))[0] ?? '', 'packages', packageName);
-      if (!resolved.startsWith(pkgDir)) {
+      
+      // Compute package directory path
+      const packagesDirIndex = filePath.indexOf(path.join('packages', packageName));
+      let pkgDir: string;
+      if (packagesDirIndex !== -1) {
+        pkgDir = path.resolve(filePath.substring(0, packagesDirIndex + path.join('packages', packageName).length));
+      } else {
+        pkgDir = path.resolve(filePath.split(path.join('packages', packageName))[0] ?? '', 'packages', packageName);
+      }
+
+      // Robust relative containment check: path.relative(pkgDir, resolved)
+      const rel = path.relative(pkgDir, resolved);
+      const isInside = !rel.startsWith('..') && !path.isAbsolute(rel);
+
+      if (!isInside) {
         violations.push({
           filePath,
           packageName,

@@ -82,4 +82,59 @@ describe('Calibration Repository and Integrity', () => {
     expect(retrieved.name).toBe('Test Calibration Dataset');
     expect(retrieved.contentHash).toBe(contentHash);
   });
+
+  it('rejects datasets with invalid parameter bounds or non-monotonic tables', () => {
+    const repo = new InMemoryCalibrationRepository();
+
+    // 1. Parameter value exceeding max
+    const invalidParamDataset = {
+      schemaVersion: 'calibration-dataset/1' as const,
+      id: 'cal.test.invalid_param',
+      version: '1.0.0',
+      name: 'Invalid Param Dataset',
+      description: 'Test invalid bounds',
+      contentHash: 'placeholder',
+      parameters: {
+        gamma: {
+          name: 'gamma',
+          value: 2.5,
+          unit: 'ratio',
+          description: 'Out of bounds',
+          min: 1.0,
+          max: 2.0,
+        },
+      },
+    };
+    invalidParamDataset.contentHash = computeCalibrationHash(invalidParamDataset);
+    expect(() => repo.register(invalidParamDataset)).toThrowError(SimulationError);
+
+    // 2. Table with non-monotonic xValues
+    const invalidTableDataset = {
+      schemaVersion: 'calibration-dataset/1' as const,
+      id: 'cal.test.invalid_table',
+      version: '1.0.0',
+      name: 'Invalid Table Dataset',
+      description: 'Test non-monotonic table',
+      contentHash: 'placeholder',
+      parameters: {
+        gamma: {
+          name: 'gamma',
+          value: 1.34,
+          unit: 'ratio',
+          description: 'Valid parameter',
+        },
+      },
+      tables1D: {
+        ve: {
+          name: 've',
+          xUnit: 'rpm',
+          yUnit: 'ratio',
+          xValues: [1000, 3000, 2000],
+          yValues: [0.8, 0.9, 0.85],
+        },
+      },
+    };
+    invalidTableDataset.contentHash = computeCalibrationHash(invalidTableDataset);
+    expect(() => repo.register(invalidTableDataset)).toThrowError(SimulationError);
+  });
 });

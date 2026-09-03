@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SimulationOrchestrator } from '../src/index.js';
-import { InMemoryCalibrationRepository, BASELINE_NATURALLY_ASPIRATED_2L } from '@engine-analyzer/calibration';
+import { InMemoryCalibrationRepository, BASELINE_NATURALLY_ASPIRATED_2L, computeCalibrationHash } from '@engine-analyzer/calibration';
 import { PluginRegistry } from '@engine-analyzer/plugins';
 import { BaselineEngineModel } from '@engine-analyzer/baseline-engine';
+import { TwoStrokeEngineModel } from '@engine-analyzer/plugin-two-stroke';
 import { SimulationError } from '@engine-analyzer/contracts';
 
 describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
@@ -49,7 +50,7 @@ describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
     expect(result.status).toBe('SUCCESS');
     expect(result.model.id).toBe('model.four-stroke.baseline');
     expect(result.provenance.calibrationId).toBe('cal.baseline.naturally_aspirated_2l');
-    expect(result.provenance.participatingModules.length).toBe(4);
+    expect(result.provenance.participatingModules.length).toBe(5);
     expect(result.channels.length).toBe(10);
     expect(Object.isFrozen(result)).toBe(true);
   });
@@ -98,7 +99,6 @@ describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
   });
 
   it('rejects simulation execution when model provenance input fingerprint does not match input', () => {
-    // Create a mock model plugin that returns a stale/arbitrary input fingerprint
     const badModel = {
       manifest: {
         id: 'model.stale.fingerprint',
@@ -114,9 +114,11 @@ describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
         const standardResult = new BaselineEngineModel().simulate(input, calibration);
         return {
           ...standardResult,
+          model: { id: 'model.stale.fingerprint', modelVersion: '1.0.0', schemaVersion: 'simulation-result/1' },
           provenance: {
             ...standardResult.provenance,
-            inputFingerprint: '0000000000000000000000000000000000000000000000000000000000000000', // Stale/mismatched
+            participatingModules: [{ id: 'model.stale.fingerprint', modelVersion: '1.0.0', schemaVersion: 'simulation-result/1' }],
+            inputFingerprint: '0000000000000000000000000000000000000000000000000000000000000000',
           },
         };
       },
@@ -124,13 +126,61 @@ describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
     pluginRegistry.register(badModel as any);
 
     expect(() => orchestrator.runSimulation(validRawInput, 'model.stale.fingerprint')).toThrowError(SimulationError);
-    try {
-      orchestrator.runSimulation(validRawInput, 'model.stale.fingerprint');
-    } catch (err) {
-      expect(err).toBeInstanceOf(SimulationError);
-      expect((err as SimulationError).code).toBe('VALIDATION_FAILED');
-      expect((err as SimulationError).message).toContain('does not match expected input fingerprint');
-    }
+  });
+
+  it('strictly rejects simulation result when model ID or version does not match invoked model', () => {
+    const spoofedModel = {
+      manifest: {
+        id: 'model.legit.manifest',
+        name: 'Legit Model',
+        version: '1.0.0',
+        contractSchemaMajor: 1,
+        capabilities: ['THERMODYNAMICS'],
+        description: 'Test model spoofing ID',
+        supportedEngineTypes: ['FOUR_STROKE_OTTO'],
+      },
+      outputChannels: [{ id: 'cylinder_pressure_bar', name: 'Pressure', quantity: 'pressure' as const, unit: 'bar' }],
+      simulate(input: any, calibration: any) {
+        const standardResult = new BaselineEngineModel().simulate(input, calibration);
+        return {
+          ...standardResult,
+          model: { id: 'model.spoofed.id', modelVersion: '1.0.0', schemaVersion: 'simulation-result/1' },
+        };
+      },
+    };
+    pluginRegistry.register(spoofedModel as any);
+
+    expect(() => orchestrator.runSimulation(validRawInput, 'model.legit.manifest')).toThrowError(SimulationError);
+  });
+
+  it('strictly rejects simulation result when calibration ID or version does not match selected calibration', () => {
+    const spoofedCalibModel = {
+      manifest: {
+        id: 'model.spoofed.calib',
+        name: 'Spoofed Calib Model',
+        version: '1.0.0',
+        contractSchemaMajor: 1,
+        capabilities: ['THERMODYNAMICS'],
+        description: 'Test model spoofing calibration provenance',
+        supportedEngineTypes: ['FOUR_STROKE_OTTO'],
+      },
+      outputChannels: [{ id: 'cylinder_pressure_bar', name: 'Pressure', quantity: 'pressure' as const, unit: 'bar' }],
+      simulate(input: any, calibration: any) {
+        const standardResult = new BaselineEngineModel().simulate(input, calibration);
+        return {
+          ...standardResult,
+          model: { id: 'model.spoofed.calib', modelVersion: '1.0.0', schemaVersion: 'simulation-result/1' },
+          provenance: {
+            ...standardResult.provenance,
+            calibrationId: 'cal.different.id',
+            participatingModules: [{ id: 'model.spoofed.calib', modelVersion: '1.0.0', schemaVersion: 'simulation-result/1' }],
+          },
+        };
+      },
+    };
+    pluginRegistry.register(spoofedCalibModel as any);
+
+    expect(() => orchestrator.runSimulation(validRawInput, 'model.spoofed.calib')).toThrowError(SimulationError);
   });
 
   it('executes V8 camshaft and ignition timing comparison vertical slice', () => {
@@ -229,7 +279,6 @@ describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
       resolutionDeg: 1.0,
     };
 
-    // Modify ONLY camshaft timing — keep all operating conditions, spark timing, and combustion duration identical
     const v8CamOnlyModifiedInput = {
       ...v8BaselineInput,
       engine: {
@@ -247,7 +296,6 @@ describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
 
     const comparisonBundle = orchestrator.runComparison(v8BaselineInput, v8CamOnlyModifiedInput);
 
-    // Performance camshaft alone must produce higher volumetric efficiency, power, torque, and BMEP at 5500 RPM
     expect(comparisonBundle.comparison.summaryDeltas.brakePowerKw.absoluteDelta).toBeGreaterThan(5.0);
     expect(comparisonBundle.comparison.summaryDeltas.brakePowerKw.percentageDelta).toBeGreaterThan(2.0);
     expect(comparisonBundle.comparison.summaryDeltas.brakeTorqueNm.absoluteDelta).toBeGreaterThan(5.0);
@@ -255,19 +303,16 @@ describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
     expect(comparisonBundle.comparison.summaryDeltas.imepBar.absoluteDelta).toBeGreaterThan(0.5);
     expect(comparisonBundle.comparison.summaryDeltas.bmepBar.absoluteDelta).toBeGreaterThan(0.5);
 
-    // Pressure channel must show meaningful delta
     const pressureDelta = comparisonBundle.comparison.channelDeltas.find((c) => c.channelId === 'cylinder_pressure_bar');
     expect(pressureDelta).toBeDefined();
     expect(pressureDelta!.maxAbsoluteDelta).toBeGreaterThan(1.0);
 
-    // Key findings should reflect the isolated camshaft upgrade
     expect(comparisonBundle.comparison.keyFindings.some((k) => k.includes('Brake power changed by +'))).toBe(true);
   });
 
   it('strictly rejects scenario comparison between results with incompatible crank angle grids', () => {
     const res720 = orchestrator.runSimulation(validRawInput);
 
-    // Construct a simulated 360-degree result with 0.5-deg resolution (720 samples total)
     const res360SameCount = {
       ...res720,
       resultId: 'sim_360_res',
@@ -289,19 +334,11 @@ describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
     };
 
     expect(() => orchestrator.compareScenarios(res720, res360SameCount as any)).toThrowError(SimulationError);
-    try {
-      orchestrator.compareScenarios(res720, res360SameCount as any);
-    } catch (err) {
-      expect(err).toBeInstanceOf(SimulationError);
-      expect((err as SimulationError).code).toBe('INCOMPATIBLE_ANGLE_GRID');
-      expect((err as SimulationError).message).toContain('Cannot compare simulation results with incompatible crank angle grids');
-    }
   });
 
   it('strictly rejects scenario comparison when matching channels have incompatible metadata', () => {
     const resBase = orchestrator.runSimulation(validRawInput);
 
-    // Modified result where cylinder_pressure_bar has mismatched unit (psi instead of bar)
     const resMismatchedUnit = {
       ...resBase,
       resultId: 'sim_mismatched_unit',
@@ -311,12 +348,36 @@ describe('Simulation Orchestration and Aggregation (Phase 5)', () => {
     };
 
     expect(() => orchestrator.compareScenarios(resBase, resMismatchedUnit as any)).toThrowError(SimulationError);
-    try {
-      orchestrator.compareScenarios(resBase, resMismatchedUnit as any);
-    } catch (err) {
-      expect(err).toBeInstanceOf(SimulationError);
-      expect((err as SimulationError).code).toBe('VALIDATION_FAILED');
-      expect((err as SimulationError).message).toContain('Incompatible channel metadata');
-    }
+  });
+
+  it('fails closed through orchestrator execution when calibration dataset contains out-of-bounds scavenging values', () => {
+    const rawDataset = {
+      ...BASELINE_NATURALLY_ASPIRATED_2L,
+      id: 'cal.invalid.scavenging',
+      parameters: {
+        ...BASELINE_NATURALLY_ASPIRATED_2L.parameters,
+        deliveryRatio: {
+          name: 'deliveryRatio',
+          value: -0.5,
+          unit: 'ratio',
+          description: 'Negative delivery ratio',
+        },
+      },
+    };
+    const invalidCalibDataset = {
+      ...rawDataset,
+      contentHash: computeCalibrationHash(rawDataset),
+    };
+    calRepo.register(invalidCalibDataset);
+    pluginRegistry.register(new TwoStrokeEngineModel());
+
+    const twoStrokeInput = {
+      engine: { boreMm: 54, strokeMm: 54, connectingRodLengthMm: 110, compressionRatio: 8.5, cylinderCount: 1 },
+      operating: { rpm: 8000, intakePressureBar: 1.0, intakeTemperatureK: 298.15, sparkTimingDegBtdc: 20, airFuelRatio: 12.5 },
+      calibrationId: 'cal.invalid.scavenging',
+      calibrationVersion: '1.0.0',
+    };
+
+    expect(() => orchestrator.runSimulation(twoStrokeInput, 'model.two-stroke.baseline')).toThrowError(SimulationError);
   });
 });

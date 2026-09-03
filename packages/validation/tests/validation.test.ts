@@ -47,6 +47,43 @@ describe('Simulation Input Validation', () => {
     }
   });
 
+  it('rejects engine geometry when connecting rod length cannot span crank radius plus wrist-pin offset', () => {
+    // Stroke = 90 (crank radius = 45), offset = 10 -> minimum rod > 55. Rod = 50 -> must reject
+    expect(() =>
+      validateEngineGeometry({
+        boreMm: 84.0,
+        strokeMm: 90.0,
+        connectingRodLengthMm: 50.0,
+        compressionRatio: 10.0,
+        cylinderCount: 4,
+        wristPinOffsetMm: 10.0,
+      })
+    ).toThrowError(SimulationError);
+
+    // Negative offset: stroke = 90, offset = -12 -> minimum rod > 57. Rod = 55 -> must reject
+    expect(() =>
+      validateEngineGeometry({
+        boreMm: 84.0,
+        strokeMm: 90.0,
+        connectingRodLengthMm: 55.0,
+        compressionRatio: 10.0,
+        cylinderCount: 4,
+        wristPinOffsetMm: -12.0,
+      })
+    ).toThrowError(SimulationError);
+
+    // Valid offset: stroke = 90, offset = 10, rod = 145 -> valid
+    const valid = validateEngineGeometry({
+      boreMm: 84.0,
+      strokeMm: 90.0,
+      connectingRodLengthMm: 145.0,
+      compressionRatio: 10.0,
+      cylinderCount: 4,
+      wristPinOffsetMm: 10.0,
+    });
+    expect(valid.wristPinOffsetMm).toBe(10.0);
+  });
+
   it('computes stable and deterministic input fingerprints', () => {
     const raw = JSON.parse(fs.readFileSync(path.join(fixturesDir, 'engine-input-valid.json'), 'utf-8'));
     const input1 = validateSimulationModelInput(raw);

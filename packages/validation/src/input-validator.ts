@@ -20,18 +20,40 @@ export const CamshaftTimingInputSchema = z.object({
   lobeSeparationAngleDeg: z.number().positive('LSA must be positive').max(180).optional(),
 });
 
-export const EngineGeometryInputSchema = z.object({
-  boreMm: z.number().min(20, 'Bore must be at least 20mm').max(500, 'Bore must not exceed 500mm'),
-  strokeMm: z.number().min(20, 'Stroke must be at least 20mm').max(600, 'Stroke must not exceed 600mm'),
-  connectingRodLengthMm: z.number().min(40, 'Connecting rod length must be at least 40mm').max(1200, 'Connecting rod length must not exceed 1200mm'),
-  compressionRatio: z.number().min(4.0, 'Compression ratio must be at least 4.0').max(30.0, 'Compression ratio must not exceed 30.0'),
-  cylinderCount: z.number().int('Cylinder count must be an integer').min(1, 'Cylinder count must be at least 1').max(24, 'Cylinder count must not exceed 24'),
-  wristPinOffsetMm: z.number().min(-20).max(20).optional().default(0),
-  camshaft: CamshaftTimingInputSchema.optional(),
-}).refine((data) => data.connectingRodLengthMm > data.strokeMm / 2, {
-  message: 'Connecting rod length must be greater than half stroke (crank radius)',
-  path: ['connectingRodLengthMm'],
-});
+export const EngineGeometryInputSchema = z
+  .object({
+    boreMm: z.number().min(20, 'Bore must be at least 20mm').max(500, 'Bore must not exceed 500mm'),
+    strokeMm: z.number().min(20, 'Stroke must be at least 20mm').max(600, 'Stroke must not exceed 600mm'),
+    connectingRodLengthMm: z.number().min(40, 'Connecting rod length must be at least 40mm').max(1200, 'Connecting rod length must not exceed 1200mm'),
+    compressionRatio: z.number().min(4.0, 'Compression ratio must be at least 4.0').max(30.0, 'Compression ratio must not exceed 30.0'),
+    cylinderCount: z.number().int('Cylinder count must be an integer').min(1, 'Cylinder count must be at least 1').max(24, 'Cylinder count must not exceed 24'),
+    wristPinOffsetMm: z.number().min(-20).max(20).optional().default(0),
+    camshaft: CamshaftTimingInputSchema.optional(),
+  })
+  .superRefine((data, ctx) => {
+    const offset = data.wristPinOffsetMm ?? 0;
+    if (!Number.isFinite(offset)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Wrist-pin offset must be finite',
+        path: ['wristPinOffsetMm'],
+      });
+    }
+    const crankRadius = data.strokeMm / 2;
+    if (data.connectingRodLengthMm <= crankRadius) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Connecting rod length must be greater than half stroke (crank radius)',
+        path: ['connectingRodLengthMm'],
+      });
+    } else if (data.connectingRodLengthMm <= crankRadius + Math.abs(offset)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Connecting rod length (${data.connectingRodLengthMm}mm) must be greater than crank radius + |wristPinOffset| (${crankRadius + Math.abs(offset)}mm)`,
+        path: ['connectingRodLengthMm'],
+      });
+    }
+  });
 
 export const OperatingConditionsInputSchema = z.object({
   rpm: z.number().min(100, 'RPM must be at least 100').max(25000, 'RPM must not exceed 25000'),

@@ -1,0 +1,21 @@
+{
+  "name": "@engine-analyzer/composition-root",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "@engine-analyzer/contracts": "^1.0.0",
+    "@engine-analyzer/validation": "^1.0.0",
+    "@engine-analyzer/calibration": "^1.0.0",
+    "@engine-analyzer/kinematics": "^1.0.0",
+    "@engine-analyzer/baseline-engine": "^1.0.0",
+    "@engine-analyzer/plugin-two-stroke": "^1.0.0",
+    "@engine-analyzer/plugins": "^1.0.0",
+    "@engine-analyzer/orchestrator": "^1.0.0",
+    "@engine-analyzer/animation": "^1.0.0",
+    "@engine-analyzer/presentation": "^1.0.0"
+  }
+}

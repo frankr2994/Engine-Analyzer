@@ -1,0 +1,12 @@
+{
+  "name": "@engine-analyzer/architecture-tests",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "typescript": "^5.8.2"
+  }
+}
