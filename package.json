@@ -3,15 +3,21 @@
   "version": "1.0.0",
   "description": "Modular internal combustion engine simulation architecture",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "test": "vitest run",
+    "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "test": "npm run build && vitest run",
+    "test:unit": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
-    "typescript": "^7.0.2",
-    "vitest": "^4.1.11",
-    "zod": "^4.5.4"
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.11"
   }
 }
