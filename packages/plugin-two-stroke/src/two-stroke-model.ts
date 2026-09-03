@@ -10,7 +10,6 @@ import {
   SimulationResultV1,
   TWO_STROKE_TDC_CONVENTION,
   SimulationError,
-  computeInputFingerprint,
   deepFreeze,
 } from '@engine-analyzer/contracts';
 import { KinematicsCalculationModule, createCrankAngleGrid } from '@engine-analyzer/kinematics';
@@ -68,18 +67,109 @@ export class TwoStrokeEngineModel implements SimulationModel<SimulationModelInpu
       grid,
     });
 
-    const vSamples = kinRes.value.channels.find((c) => c.channelId === 'cylinder_volume_cm3')!.samples;
-    const posSamples = kinRes.value.channels.find((c) => c.channelId === 'piston_position_mm')!.samples;
-    const velSamples = kinRes.value.channels.find((c) => c.channelId === 'piston_velocity_m_s')!.samples;
-    const accSamples = kinRes.value.channels.find((c) => c.channelId === 'piston_acceleration_m_s2')!.samples;
-    const rodAngleSamples = kinRes.value.channels.find((c) => c.channelId === 'connecting_rod_angle_deg')!.samples;
+    const vChannel = kinRes.value.channels.find((c) => c.channelId === 'cylinder_volume_cm3');
+    const posChannel = kinRes.value.channels.find((c) => c.channelId === 'piston_position_mm');
+    const velChannel = kinRes.value.channels.find((c) => c.channelId === 'piston_velocity_m_s');
+    const accChannel = kinRes.value.channels.find((c) => c.channelId === 'piston_acceleration_m_s2');
+    const rodAngleChannel = kinRes.value.channels.find((c) => c.channelId === 'connecting_rod_angle_deg');
+
+    if (!vChannel || !posChannel || !velChannel || !accChannel || !rodAngleChannel) {
+      throw new SimulationError({
+        code: 'CHANNEL_NOT_FOUND',
+        message: 'Kinematics module failed to provide required base kinematic channels for two-stroke model.',
+      });
+    }
+
+    const vSamples = vChannel.samples;
+    const posSamples = posChannel.samples;
+    const velSamples = velChannel.samples;
+    const accSamples = accChannel.samples;
+    const rodAngleSamples = rodAngleChannel.samples;
 
     const vTdc = kinRes.value.clearanceVolumeCm3;
     const vBdc = kinRes.value.totalVolumeCm3;
+    const vDisplacementCm3 = kinRes.value.displacementVolumeCm3;
 
-    // Two-stroke thermodynamics & combustion
+    if (!Number.isFinite(vTdc) || vTdc <= 0 || !Number.isFinite(vBdc) || vBdc <= vTdc) {
+      throw new SimulationError({
+        code: 'PHYSICAL_INVARIANT_VIOLATION',
+        message: `Invalid clearance/total volume: vTdc=${vTdc}, vBdc=${vBdc}`,
+      });
+    }
+
+    // 1. Dynamic trapped charge & fuel energy calculations
     const gammaC = calibration.parameters['gammaCompression']?.value ?? 1.32;
     const gammaE = calibration.parameters['gammaExpansion']?.value ?? 1.28;
+    const lhvMjKg = calibration.parameters['fuelLowerHeatingValueMjKg']?.value ?? 44.0;
+    const combEff = calibration.parameters['combustionEfficiency']?.value ?? 0.95;
+    const wiebeA = calibration.parameters['wiebeEfficiencyFactor']?.value ?? 5.0;
+    const wiebeM = calibration.parameters['wiebeFormFactor']?.value ?? 2.0;
+    const frictionA = calibration.parameters['frictionCoeffA']?.value ?? 0.8;
+    const frictionB = calibration.parameters['frictionCoeffB']?.value ?? 0.004;
+    const frictionC = calibration.parameters['frictionCoeffC']?.value ?? 0.00008;
+    const deliveryRatio = calibration.parameters['deliveryRatio']?.value ?? 0.82;
+    const trappingEfficiency = calibration.parameters['trappingEfficiency']?.value ?? 0.72;
+
+    // Physical-domain validation of scavenging and thermodynamic calibration parameters
+    if (!Number.isFinite(deliveryRatio) || deliveryRatio <= 0.05 || deliveryRatio > 3.0) {
+      throw new SimulationError({
+        code: 'PHYSICAL_INVARIANT_VIOLATION',
+        message: `Delivery ratio must be within physical domain (0.05, 3.0], got ${deliveryRatio}`,
+      });
+    }
+    if (!Number.isFinite(trappingEfficiency) || trappingEfficiency <= 0.05 || trappingEfficiency > 1.0) {
+      throw new SimulationError({
+        code: 'PHYSICAL_INVARIANT_VIOLATION',
+        message: `Trapping efficiency must be within physical domain (0.05, 1.0], got ${trappingEfficiency}`,
+      });
+    }
+    if (!Number.isFinite(combEff) || combEff <= 0.1 || combEff > 1.0) {
+      throw new SimulationError({
+        code: 'PHYSICAL_INVARIANT_VIOLATION',
+        message: `Combustion efficiency must be within physical domain (0.1, 1.0], got ${combEff}`,
+      });
+    }
+    if (!Number.isFinite(lhvMjKg) || lhvMjKg <= 5.0 || lhvMjKg > 200.0) {
+      throw new SimulationError({
+        code: 'PHYSICAL_INVARIANT_VIOLATION',
+        message: `Fuel LHV must be within physical domain (5.0, 200.0] MJ/kg, got ${lhvMjKg}`,
+      });
+    }
+    if (!Number.isFinite(gammaC) || gammaC <= 1.0 || gammaC > 1.7) {
+      throw new SimulationError({
+        code: 'PHYSICAL_INVARIANT_VIOLATION',
+        message: `Compression gamma must be within physical domain (1.0, 1.7], got ${gammaC}`,
+      });
+    }
+    if (!Number.isFinite(gammaE) || gammaE <= 1.0 || gammaE > 1.7) {
+      throw new SimulationError({
+        code: 'PHYSICAL_INVARIANT_VIOLATION',
+        message: `Expansion gamma must be within physical domain (1.0, 1.7], got ${gammaE}`,
+      });
+    }
+
+    // Exhaust port closes at 260 deg
+    const portIdx = Math.round(260 / resolutionDeg);
+    const vPort = vSamples[Math.min(vSamples.length - 1, Math.max(0, portIdx))]!;
+
+    // Delivered and trapped air mass at exhaust port closure via ideal gas law using delivery ratio and trapping efficiency
+    const rSpecAir = 287.05; // J/(kg*K)
+    const pScavPa = operating.intakePressureBar * 1e5;
+    const deliveredAirMassPerCylKg = (deliveryRatio * pScavPa * (vPort * 1e-6)) / (rSpecAir * operating.intakeTemperatureK);
+    const airMassPerCylKg = trappingEfficiency * deliveredAirMassPerCylKg;
+    const fuelMassPerCylKg = airMassPerCylKg / operating.airFuelRatio;
+    const totalMixtureMassKg = airMassPerCylKg + fuelMassPerCylKg;
+
+    // Heat release per cylinder (J)
+    const fuelEnergyPerCycleJ = fuelMassPerCylKg * (lhvMjKg * 1e6) * combEff;
+    const specificHeatCv = 718.0; // J/(kg*K)
+    const deltaTTotal = fuelEnergyPerCycleJ / (totalMixtureMassKg * specificHeatCv);
+
+    // Compression state at TDC and trapped charge density scaling
+    const scavengeChargeFactor = (deliveryRatio * trappingEfficiency) / (0.82 * 0.72);
+    const pCompTdc = operating.intakePressureBar * Math.pow(vPort / vTdc, gammaC);
+    const tCompTdc = operating.intakeTemperatureK * Math.pow(vPort / vTdc, gammaC - 1.0);
+    const deltaPCombustion = pCompTdc * scavengeChargeFactor * (deltaTTotal / tCompTdc) * 0.48;
 
     const pressureSamples: number[] = [];
     const tempSamples: number[] = [];
@@ -87,47 +177,74 @@ export class TwoStrokeEngineModel implements SimulationModel<SimulationModelInpu
     const torqueSamples: number[] = [];
 
     const sparkTimingDegBtdc = operating.sparkTimingDegBtdc;
-    const sparkAngle = 360.0 - sparkTimingDegBtdc;
+    // For 2-stroke 0..360, 0 deg is TDC firing.
+    // Spark at (360 - sparkTimingDegBtdc) mod 360
+    let sparkAngle = (360.0 - sparkTimingDegBtdc) % 360.0;
+    if (sparkAngle < 0) sparkAngle += 360.0;
     const burnDuration = operating.combustionDurationDeg ?? 35.0;
 
-    const pCompTdc = operating.intakePressureBar * Math.pow(vBdc / vTdc, gammaC);
-    const deltaP = pCompTdc * 2.5;
-
     for (let i = 0; i < grid.samples.length; i++) {
-      const theta = grid.samples[i] ?? 0;
-      const v = vSamples[i] ?? vTdc;
-      const betaDeg = rodAngleSamples[i] ?? 0;
+      const theta = grid.samples[i]!;
+      const v = vSamples[i]!;
+      const betaDeg = rodAngleSamples[i]!;
 
       let xb = 0;
       let p = operating.intakePressureBar;
       let t = operating.intakeTemperatureK;
 
-      if (theta >= 0 && theta < 180) {
-        // Expansion / Blowdown stroke
-        const phi = Math.min(1.0, (theta + (360 - sparkAngle)) / burnDuration);
-        xb = phi > 0 ? 1.0 - Math.exp(-5.0 * Math.pow(phi, 3)) : 1.0;
-        const pPeak = pCompTdc + deltaP;
-        const heatLoss = 1.0 - 0.2 * (theta / 180.0);
-        const portBlowdown = theta > 100 ? Math.max(0.2, 1.0 - 0.8 * ((theta - 100) / 80.0)) : 1.0;
-        p = pPeak * Math.pow(vTdc / v, gammaE) * heatLoss * portBlowdown;
-        t = 1800.0 * Math.pow(vTdc / v, gammaE - 1.0) * heatLoss;
-      } else {
-        // Scavenging (180..260) & Compression (260..360)
-        if (theta < 260) {
-          p = 1.15; // Scavenging pressure
-          t = 380.0;
-          xb = 0.0;
+      if (theta >= 180 && theta < 260) {
+        // Scavenging stroke (180..260 deg) - fresh charge admitted, clear burned fraction
+        xb = 0.0;
+        p = operating.intakePressureBar * 1.06;
+        t = operating.intakeTemperatureK + 50.0;
+      } else if (theta >= 260 && theta < 360) {
+        // Trapped compression stroke (260..360 deg)
+        if (sparkAngle >= 260 && theta >= sparkAngle) {
+          const phi = Math.min(1.0, (theta - sparkAngle) / burnDuration);
+          xb = 1.0 - Math.exp(-wiebeA * Math.pow(phi, wiebeM + 1));
         } else {
-          // Trapped compression
-          const vPort = vSamples[Math.round((260 / resolutionDeg))] ?? vBdc;
-          p = operating.intakePressureBar * Math.pow(vPort / v, gammaC);
-          t = operating.intakeTemperatureK * Math.pow(vPort / v, gammaC - 1.0);
-          if (theta >= sparkAngle) {
-            const phi = (theta - sparkAngle) / burnDuration;
-            xb = 1.0 - Math.exp(-5.0 * Math.pow(phi, 3));
-            p += deltaP * xb * 0.5;
-          }
+          xb = 0.0;
         }
+
+        const pMotored = operating.intakePressureBar * Math.pow(vPort / v, gammaC);
+        const tMotored = operating.intakeTemperatureK * Math.pow(vPort / v, gammaC - 1.0);
+        p = pMotored + deltaPCombustion * xb;
+        t = tMotored + deltaTTotal * xb * 0.7;
+      } else {
+        // Expansion stroke (0 <= theta < 180 deg)
+        let relSpark: number;
+        if (sparkAngle >= 260) {
+          // Spark before TDC (e.g. 340 deg for 20 deg BTDC)
+          relSpark = (360.0 - sparkAngle) + theta;
+        } else {
+          // Spark at or after TDC (e.g. 10 deg ATDC)
+          relSpark = theta - sparkAngle;
+        }
+
+        if (relSpark < 0) {
+          xb = 0.0;
+        } else if (relSpark <= burnDuration) {
+          const phi = relSpark / burnDuration;
+          xb = 1.0 - Math.exp(-wiebeA * Math.pow(phi, wiebeM + 1));
+        } else {
+          // Burn is complete; preserve full burned state across expansion until scavenging at 180 deg
+          xb = 1.0;
+        }
+
+        const pMotored = operating.intakePressureBar * Math.pow(vPort / v, gammaC);
+        const tMotored = operating.intakeTemperatureK * Math.pow(vPort / v, gammaC - 1.0);
+        const heatLoss = 1.0 - 0.22 * (theta / 180.0);
+        const portBlowdown = theta > 100 ? Math.max(0.18, 1.0 - 0.82 * ((theta - 100) / 80.0)) : 1.0;
+
+        p = (pMotored + deltaPCombustion * xb * Math.pow(vTdc / v, gammaE)) * heatLoss * portBlowdown;
+        t = (tMotored + deltaTTotal * xb * Math.pow(vTdc / v, gammaE - 1.0)) * heatLoss;
+      }
+
+      if (!Number.isFinite(p) || !Number.isFinite(t) || !Number.isFinite(xb)) {
+        throw new SimulationError({
+          code: 'PHYSICAL_INVARIANT_VIOLATION',
+          message: `Non-finite thermodynamic output at sample index ${i} (theta=${theta} deg): p=${p}, t=${t}, xb=${xb}`,
+        });
       }
 
       pressureSamples.push(p);
@@ -140,11 +257,18 @@ export class TwoStrokeEngineModel implements SimulationModel<SimulationModelInpu
       const netForceN = (p - 1.0) * 1e5 * pistonAreaM2;
       const thetaRad = (theta * Math.PI) / 180.0;
       const betaRad = (betaDeg * Math.PI) / 180.0;
-      const trq = netForceN * crankRadiusM * (Math.sin(thetaRad + betaRad) / Math.max(0.01, Math.cos(betaRad)));
+      const cosBeta = Math.cos(betaRad);
+      if (Math.abs(cosBeta) < 1e-6) {
+        throw new SimulationError({
+          code: 'PHYSICAL_INVARIANT_VIOLATION',
+          message: `Connecting rod angle cosine near zero at sample index ${i} (beta=${betaDeg} deg)`,
+        });
+      }
+      const trq = netForceN * crankRadiusM * (Math.sin(thetaRad + betaRad) / cosBeta);
       torqueSamples.push(trq);
     }
 
-    // Performance calculations for 2-stroke (1 power cycle per revolution)
+    // 2. Numerical integration of Indicated Work W = integral(P dV)
     let workPerCylJ = 0;
     const n = grid.samples.length;
     for (let i = 0; i < n; i++) {
@@ -155,17 +279,29 @@ export class TwoStrokeEngineModel implements SimulationModel<SimulationModelInpu
     }
 
     const totalWorkJ = workPerCylJ * engine.cylinderCount;
-    const imepBar = workPerCylJ / (kinRes.value.displacementVolumeCm3 * 0.1);
-    const fmepBar = 0.8 + 0.003 * Math.max(...pressureSamples);
+    const imepBar = workPerCylJ / (vDisplacementCm3 * 0.1);
+    const maxP = Math.max(...pressureSamples);
+    const meanPistonSpeedMs = 2.0 * (engine.strokeMm * 1e-3) * (operating.rpm / 60.0);
+    const fmepBar = frictionA + frictionB * maxP + frictionC * Math.pow(meanPistonSpeedMs, 2);
     const bmepBar = Math.max(0.1, imepBar - fmepBar);
 
-    // 2-stroke: cyclesPerSecond = RPM / 60
+    // 2-stroke: 1 power cycle per revolution -> cyclesPerSecond = RPM / 60
     const cyclesPerSecond = operating.rpm / 60.0;
     const indicatedPowerKw = (totalWorkJ * cyclesPerSecond) / 1000.0;
     const brakePowerKw = indicatedPowerKw * (bmepBar / imepBar);
     const omega = 2.0 * Math.PI * (operating.rpm / 60.0);
     const indicatedTorqueNm = (indicatedPowerKw * 1000.0) / omega;
     const brakeTorqueNm = (brakePowerKw * 1000.0) / omega;
+
+    // Dynamic Thermal Efficiencies and BSFC
+    const totalFuelEnergyPerCycleJ = fuelEnergyPerCycleJ * engine.cylinderCount;
+    const indicatedThermalEfficiencyPct = (totalWorkJ / totalFuelEnergyPerCycleJ) * 100.0;
+    const brakeThermalEfficiencyPct = indicatedThermalEfficiencyPct * (bmepBar / imepBar);
+    const mechanicalEfficiencyPct = (bmepBar / imepBar) * 100.0;
+
+    const fuelMassPerCycleTotalG = fuelMassPerCylKg * engine.cylinderCount * 1e3;
+    const fuelMassFlowGHour = fuelMassPerCycleTotalG * cyclesPerSecond * 3600.0;
+    const bsfc = brakePowerKw > 0 ? fuelMassFlowGHour / brakePowerKw : 0;
 
     const calcStats = (samples: readonly number[]) => {
       let min = samples[0] ?? 0;
@@ -200,51 +336,49 @@ export class TwoStrokeEngineModel implements SimulationModel<SimulationModelInpu
       { channelId: 'instantaneous_torque_nm', name: 'Instantaneous Crank Torque', quantity: 'torque', unit: 'Nm', samples: torqueSamples, min: torqStats.min, max: torqStats.max, mean: torqStats.mean },
     ];
 
-    const inputFingerprint = computeInputFingerprint(input);
+    const canonicalJson = (obj: unknown): string => {
+      if (obj === null || typeof obj !== 'object') {
+        return JSON.stringify(obj);
+      }
+      if (Array.isArray(obj)) {
+        return '[' + obj.map((item) => canonicalJson(item)).join(',') + ']';
+      }
+      const keys = Object.keys(obj as Record<string, unknown>).sort();
+      const entries = keys.map((key) => `${JSON.stringify(key)}:${canonicalJson((obj as Record<string, unknown>)[key])}`);
+      return '{' + entries.join(',') + '}';
+    };
 
-    const normalizedConfiguration: SimulationModelInput = {
-      engine: {
-        ...engine,
-        wristPinOffsetMm: engine.wristPinOffsetMm ?? 0.0,
-      },
-      operating: {
-        ...operating,
-        combustionDurationDeg: operating.combustionDurationDeg ?? 35.0,
-      },
-      calibrationId: input.calibrationId,
-      calibrationVersion: input.calibrationVersion,
+    const inputFingerprint = crypto.createHash('sha256').update(canonicalJson(input)).digest('hex');
+
+    const normalizedConfiguration = {
+      engine: { ...engine },
+      operating: { ...operating },
+      calibrationId: calibration.id,
+      calibrationVersion: calibration.version,
       resolutionDeg,
     };
 
     const assumptions: readonly string[] = [
-      'Two-stroke ported scavenging with trapped volume approximation',
-      'Wiebe combustion formulation over 360 degree cycle',
-      'Port blowdown loss model',
+      `Loop scavenging with delivery ratio ${deliveryRatio.toFixed(2)} and trapping efficiency ${trappingEfficiency.toFixed(2)}.`,
+      'Exhaust port opening blowdown initiates at 100° ATDC.',
     ];
 
     const confidence = {
-      overallScore: 0.9,
+      overallScore: 0.88,
       confidenceLevel: 'HIGH' as const,
-      uncertaintyBandPct: 4.8,
-      limitingFactors: ['Empirical scavenging efficiency model'],
+      uncertaintyBandPct: 6.5,
+      limitingFactors: ['Scavenging efficiency empirical model', 'Blowdown pressure discharge dynamics'],
     };
 
     const explainability = {
-      summary: '2-stroke spark-ignition model with loop scavenging resolved over 360 deg cycle.',
+      summary: '2-stroke spark-ignition simulation calculated over 360 deg cycle.',
       contributions: [
         {
-          category: 'gas_exchange',
-          parameter: 'scavenging',
-          impactPct: 22.0,
+          category: 'scavenging',
+          parameter: 'trappingEfficiency',
+          impactPct: Math.round((trappingEfficiency - 0.5) * 1000) / 10,
           direction: 'POSITIVE' as const,
-          rationale: 'Port blowdown and scavenging occur between 180 and 260 deg crank angle.',
-        },
-        {
-          category: 'combustion',
-          parameter: 'sparkTimingDegBtdc',
-          impactPct: 15.0,
-          direction: 'POSITIVE' as const,
-          rationale: `Spark timing at ${operating.sparkTimingDegBtdc} deg BTDC initiates combustion before TDC.`,
+          rationale: `Scavenging parameters (delivery ratio ${deliveryRatio.toFixed(2)}, trapping efficiency ${trappingEfficiency.toFixed(2)}) scaled trapped air mass to ${(airMassPerCylKg * 1e3).toFixed(3)} g per cylinder.`,
         },
       ],
     };
@@ -265,8 +399,8 @@ export class TwoStrokeEngineModel implements SimulationModel<SimulationModelInpu
         calibrationVersion: calibration.version,
         calibrationContentHash: calibration.contentHash,
         participatingModules: [
-          { id: this.kinematics.id, modelVersion: this.kinematics.modelVersion, schemaVersion: this.kinematics.schemaVersion },
           { id: this.manifest.id, modelVersion: this.manifest.version, schemaVersion: 'simulation-result/1' },
+          { id: this.kinematics.id, modelVersion: this.kinematics.modelVersion, schemaVersion: this.kinematics.schemaVersion },
         ],
         orchestratorVersion: '1.0.0',
         schemaVersion: 'simulation-result/1',
@@ -286,11 +420,11 @@ export class TwoStrokeEngineModel implements SimulationModel<SimulationModelInpu
         imepBar: Math.round(imepBar * 100) / 100,
         bmepBar: Math.round(bmepBar * 100) / 100,
         fmepBar: Math.round(fmepBar * 100) / 100,
-        indicatedThermalEfficiencyPct: 32.5,
-        brakeThermalEfficiencyPct: 27.2,
-        mechanicalEfficiencyPct: Math.round((bmepBar / imepBar) * 1000) / 10,
-        fuelMassPerCycleG: 0.045,
-        specificFuelConsumptionGBhpKwh: 295.0,
+        indicatedThermalEfficiencyPct: Math.round(indicatedThermalEfficiencyPct * 100) / 100,
+        brakeThermalEfficiencyPct: Math.round(brakeThermalEfficiencyPct * 100) / 100,
+        mechanicalEfficiencyPct: Math.round(mechanicalEfficiencyPct * 100) / 100,
+        fuelMassPerCycleG: Math.round(fuelMassPerCycleTotalG * 10000) / 10000,
+        specificFuelConsumptionGBhpKwh: Math.round(bsfc * 10) / 10,
       },
       diagnostics: [
         {
