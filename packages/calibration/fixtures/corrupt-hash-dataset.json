@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "calibration-dataset/1",
+  "id": "cal.test.corrupt",
+  "version": "1.0.0",
+  "name": "Corrupt Dataset",
+  "description": "Dataset with tampered hash",
+  "contentHash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "parameters": {
+    "gammaCompression": {
+      "name": "gammaCompression",
+      "value": 1.35,
+      "unit": "ratio",
+      "description": "Compression gamma"
+    }
+  }
+}

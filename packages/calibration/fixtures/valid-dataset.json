@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "calibration-dataset/1",
+  "id": "cal.test.custom",
+  "version": "1.0.0",
+  "name": "Test Calibration Dataset",
+  "description": "Test dataset for unit verification",
+  "contentHash": "57b6f6f1c4e7f300c3b0dfb2fbcbe54f3b7b2ce8fce61ec001b6a7ec6a111a93",
+  "parameters": {
+    "gammaCompression": {
+      "name": "gammaCompression",
+      "value": 1.35,
+      "unit": "ratio",
+      "description": "Compression gamma"
+    }
+  }
+}

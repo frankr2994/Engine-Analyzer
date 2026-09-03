@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "calculation-result/1",
+  "module": {
+    "id": "module.thermodynamics.otto",
+    "modelVersion": "1.0.0",
+    "schemaVersion": "calculation-result/1"
+  },
+  "crankAngle": {
+    "conventionId": "FOUR_STROKE_TDC_FIRING_0_720",
+    "cycleDegrees": 720,
+    "angleDegrees": 180.0,
+    "sampleIndex": 180,
+    "normalizedProgress": 0.25
+  },
+  "value": {
+    "pressureBar": 2.45,
+    "temperatureK": 640.2,
+    "volumeCm3": 450.0
+  },
+  "diagnostics": [
+    {
+      "code": "INFO_SAMPLE_CALCULATED",
+      "message": "Calculation completed within normal bounds",
+      "level": "info",
+      "timestamp": "2026-09-02T20:00:00.000Z"
+    }
+  ]
+}

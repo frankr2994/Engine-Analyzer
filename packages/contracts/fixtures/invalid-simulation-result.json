@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "simulation-result/1",
+  "status": "SUCCESS",
+  "model": {
+    "id": "model.four-stroke.baseline",
+    "modelVersion": "1.0.0",
+    "schemaVersion": "simulation-result/1"
+  },
+  "provenance": {
+    "simulationTimestamp": "2026-09-02T20:00:00.000Z",
+    "inputFingerprint": "abc",
+    "calibrationId": "cal.1",
+    "calibrationVersion": "1.0.0",
+    "calibrationContentHash": "hash",
+    "participatingModules": [],
+    "orchestratorVersion": "1.0.0",
+    "schemaVersion": "simulation-result/1"
+  },
+  "crankAngleGrid": {
+    "convention": {
+      "conventionId": "FOUR_STROKE_TDC_FIRING_0_720",
+      "cycleDegrees": 720,
+      "zeroReference": "TDC_FIRING",
+      "direction": "CLOCKWISE",
+      "strokeCount": 4,
+      "endpointIncluded": false
+    },
+    "startAngleDeg": 0,
+    "endAngleDeg": 720,
+    "resolutionDeg": 180,
+    "sampleCount": 4,
+    "samples": [0, 180, 360, 540]
+  },
+  "channels": [
+    {
+      "channelId": "cylinder_pressure_bar",
+      "name": "Cylinder Pressure",
+      "quantity": "pressure",
+      "unit": "bar",
+      "samples": [50.0, 4.0],
+      "min": 50.0,
+      "max": 1.0,
+      "mean": 14.0
+    }
+  ],
+  "summary": {
+    "indicatedPowerKw": 85.5
+  },
+  "diagnostics": []
+}

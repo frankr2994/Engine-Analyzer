@@ -1,0 +1,128 @@
+{
+  "schemaVersion": "simulation-result/1",
+  "resultId": "sim_fixture_valid_001",
+  "status": "SUCCESS",
+  "model": {
+    "id": "model.four-stroke.baseline",
+    "modelVersion": "1.0.0",
+    "schemaVersion": "simulation-result/1"
+  },
+  "provenance": {
+    "simulationTimestamp": "2026-09-02T20:00:00.000Z",
+    "inputFingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "calibrationId": "cal.baseline.naturally_aspirated_2l",
+    "calibrationVersion": "1.0.0",
+    "calibrationContentHash": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+    "participatingModules": [
+      { "id": "module.kinematics", "modelVersion": "1.0.0", "schemaVersion": "calculation-result/1" },
+      { "id": "module.thermodynamics", "modelVersion": "1.0.0", "schemaVersion": "calculation-result/1" },
+      { "id": "module.combustion.wiebe", "modelVersion": "1.0.0", "schemaVersion": "calculation-result/1" }
+    ],
+    "orchestratorVersion": "1.0.0",
+    "schemaVersion": "simulation-result/1"
+  },
+  "normalizedConfiguration": {
+    "engine": {
+      "boreMm": 84.0,
+      "strokeMm": 90.0,
+      "connectingRodLengthMm": 145.0,
+      "compressionRatio": 10.5,
+      "cylinderCount": 4,
+      "wristPinOffsetMm": 0.0
+    },
+    "operating": {
+      "rpm": 3000.0,
+      "intakePressureBar": 1.0,
+      "intakeTemperatureK": 298.15,
+      "sparkTimingDegBtdc": 18.0,
+      "airFuelRatio": 14.7,
+      "combustionDurationDeg": 45.0
+    },
+    "calibrationId": "cal.baseline.naturally_aspirated_2l",
+    "calibrationVersion": "1.0.0",
+    "resolutionDeg": 180.0
+  },
+  "assumptions": [
+    "Ideal gas thermodynamics with temperature-dependent specific heat ratio",
+    "Wiebe function mass fraction burned empirical formulation",
+    "Chen-Flynn mechanical friction regression model"
+  ],
+  "confidence": {
+    "overallScore": 0.95,
+    "confidenceLevel": "HIGH",
+    "uncertaintyBandPct": 3.2,
+    "limitingFactors": ["Single-zone Wiebe approximation"]
+  },
+  "explainability": {
+    "summary": "Standard stoichiometric 4-stroke cycle at peak thermal efficiency regime.",
+    "contributions": [
+      {
+        "category": "combustion",
+        "parameter": "sparkTimingDegBtdc",
+        "impactPct": 12.5,
+        "direction": "POSITIVE",
+        "rationale": "MBF50 achieved near optimal 8 deg ATDC."
+      }
+    ]
+  },
+  "crankAngleGrid": {
+    "convention": {
+      "conventionId": "FOUR_STROKE_TDC_FIRING_0_720",
+      "cycleDegrees": 720,
+      "zeroReference": "TDC_FIRING",
+      "direction": "CLOCKWISE",
+      "strokeCount": 4,
+      "endpointIncluded": false
+    },
+    "startAngleDeg": 0,
+    "endAngleDeg": 720,
+    "resolutionDeg": 180,
+    "sampleCount": 4,
+    "samples": [0, 180, 360, 540]
+  },
+  "channels": [
+    {
+      "channelId": "cylinder_pressure_bar",
+      "name": "Cylinder Pressure",
+      "quantity": "pressure",
+      "unit": "bar",
+      "samples": [50.0, 4.0, 1.0, 1.05],
+      "min": 1.0,
+      "max": 50.0,
+      "mean": 14.0125
+    },
+    {
+      "channelId": "cylinder_volume_cm3",
+      "name": "Cylinder Volume",
+      "quantity": "volume",
+      "unit": "cm3",
+      "samples": [50.0, 500.0, 50.0, 500.0],
+      "min": 50.0,
+      "max": 500.0,
+      "mean": 275.0
+    }
+  ],
+  "summary": {
+    "indicatedPowerKw": 85.5,
+    "brakePowerKw": 72.3,
+    "indicatedTorqueNm": 175.2,
+    "brakeTorqueNm": 148.1,
+    "indicatedWorkJ": 1425.0,
+    "imepBar": 11.4,
+    "bmepBar": 9.65,
+    "fmepBar": 1.75,
+    "indicatedThermalEfficiencyPct": 38.5,
+    "brakeThermalEfficiencyPct": 32.5,
+    "mechanicalEfficiencyPct": 84.4,
+    "fuelMassPerCycleG": 0.088,
+    "specificFuelConsumptionGBhpKwh": 252.0
+  },
+  "diagnostics": [
+    {
+      "code": "INFO_SIMULATION_CONVERGED",
+      "message": "Simulation converged in 1 cycle iteration",
+      "level": "info",
+      "timestamp": "2026-09-02T20:00:00.000Z"
+    }
+  ]
+}

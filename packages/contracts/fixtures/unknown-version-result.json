@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "calculation-result/99",
+  "module": {
+    "id": "module.future",
+    "modelVersion": "99.0.0",
+    "schemaVersion": "calculation-result/99"
+  },
+  "value": { "dummy": 123 },
+  "diagnostics": []
+}

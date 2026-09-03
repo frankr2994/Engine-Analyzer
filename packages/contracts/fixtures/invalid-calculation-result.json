@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "calculation-result/1",
+  "module": {
+    "id": "",
+    "modelVersion": "not-semver",
+    "schemaVersion": "calculation-result/1"
+  },
+  "value": "not-an-object",
+  "diagnostics": [
+    {
+      "code": "ERROR_CORRUPT",
+      "message": "Malformed data",
+      "level": "invalid_level",
+      "timestamp": "bad_timestamp"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "paths": {
+      "@engine-analyzer/contracts": ["./packages/contracts/src/index.ts"],
+      "@engine-analyzer/validation": ["./packages/validation/src/index.ts"],
+      "@engine-analyzer/calibration": ["./packages/calibration/src/index.ts"],
+      "@engine-analyzer/kinematics": ["./packages/kinematics/src/index.ts"],
+      "@engine-analyzer/baseline-engine": ["./packages/baseline-engine/src/index.ts"],
+      "@engine-analyzer/orchestrator": ["./packages/orchestrator/src/index.ts"],
+      "@engine-analyzer/plugins": ["./packages/plugins/src/index.ts"],
+      "@engine-analyzer/animation": ["./packages/animation/src/index.ts"],
+      "@engine-analyzer/presentation": ["./packages/presentation/src/index.ts"],
+      "@engine-analyzer/plugin-two-stroke": ["./packages/plugin-two-stroke/src/index.ts"],
+      "@engine-analyzer/composition-root": ["./packages/composition-root/src/index.ts"]
+    }
+  },
+  "include": [
+    "packages/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "packages/**/fixtures/**"
+  ]
+}

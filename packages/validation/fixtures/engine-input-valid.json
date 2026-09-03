@@ -1,0 +1,21 @@
+{
+  "engine": {
+    "boreMm": 84.0,
+    "strokeMm": 90.0,
+    "connectingRodLengthMm": 145.0,
+    "compressionRatio": 10.5,
+    "cylinderCount": 4,
+    "wristPinOffsetMm": 0.0
+  },
+  "operating": {
+    "rpm": 3000.0,
+    "intakePressureBar": 1.0,
+    "intakeTemperatureK": 298.15,
+    "sparkTimingDegBtdc": 15.0,
+    "airFuelRatio": 14.7,
+    "combustionDurationDeg": 45.0
+  },
+  "calibrationId": "cal.baseline.naturally_aspirated_2l",
+  "calibrationVersion": "1.0.0",
+  "resolutionDeg": 1.0
+}
